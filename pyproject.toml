@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dexctl"
+version = "0.1.0"
+description = "Codex account control plane"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Ravi Hammond" }
+]
+dependencies = ["prompt_toolkit>=3.0.52", "rich>=13"]
+keywords = ["cli", "codex", "accounts", "openai", "tooling"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/ravihammond/dexctl"
+Repository = "https://github.com/ravihammond/dexctl"
+Issues = "https://github.com/ravihammond/dexctl/issues"
+
+[project.scripts]
+dexctl = "dexctl.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "twine>=6.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

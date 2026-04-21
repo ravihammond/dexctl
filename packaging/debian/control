@@ -1,0 +1,23 @@
+Source: dexctl
+Section: utils
+Priority: optional
+Maintainer: Ravi Hammond
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ pybuild-plugin-pyproject,
+ python3-all,
+ python3-setuptools,
+ python3-prompt-toolkit,
+ python3-rich
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+
+Package: dexctl
+Architecture: all
+Depends:
+ ${misc:Depends},
+ ${python3:Depends}
+Description: Codex account control plane
+ dexctl manages Codex account state, runtime auth installation, usage
+ inspection, migration, and account switching from a single CLI.

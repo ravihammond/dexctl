@@ -1,0 +1,19 @@
+class Dexctl < Formula
+  include Language::Python::Virtualenv
+
+  desc "Codex account control plane"
+  homepage "https://github.com/ravihammond/dexctl"
+  url "https://github.com/ravihammond/dexctl/archive/refs/tags/v@VERSION@.tar.gz"
+  sha256 "@SHA256@"
+  license "MIT"
+
+  depends_on "python@3.12"
+
+  def install
+    virtualenv_install_with_resources
+  end
+
+  test do
+    assert_match "dexctl", shell_output("#{bin}/dexctl --help")
+  end
+end
