@@ -31,6 +31,13 @@ jobs:
             --artifact dist/*.tar.gz
       - name: Build Debian artifact
         run: packaging/scripts/build-deb.sh
+      - name: Publish Homebrew tap update
+        if: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN != '' }}
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          TAP_URL="https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/ravihammond/homebrew-dexctl.git"
+          packaging/scripts/publish-homebrew-tap.sh "$TAP_URL" packaging/homebrew/dexctl.rb
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
