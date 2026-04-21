@@ -7,16 +7,32 @@ on:
 
 permissions:
   contents: write
+  pages: write
   id-token: write
 
 jobs:
-  build-and-release:
+  build-artifacts:
     runs-on: ubuntu-latest
+    env:
+      APT_REPOSITORY_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apt
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Install Debian packaging tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            debhelper \
+            dh-python \
+            dpkg-dev \
+            gnupg \
+            pybuild-plugin-pyproject \
+            python3-all \
+            python3-prompt-toolkit \
+            python3-rich \
+            python3-setuptools
       - uses: astral-sh/setup-uv@v6
       - name: Sync environment
         run: uv sync --extra dev
@@ -31,20 +47,106 @@ jobs:
             --artifact dist/*.tar.gz
       - name: Build Debian artifact
         run: packaging/scripts/build-deb.sh
+      - name: Validate apt repository signing configuration
+        env:
+          APT_GPG_KEY_ID: ${{ secrets.APT_GPG_KEY_ID }}
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          test -n "$APT_GPG_PRIVATE_KEY" || { echo "Missing required secret: APT_GPG_PRIVATE_KEY" >&2; exit 1; }
+          test -n "$APT_GPG_KEY_ID" || { echo "Missing required secret: APT_GPG_KEY_ID" >&2; exit 1; }
+      - name: Import apt repository signing key
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          mkdir -p "$HOME/.gnupg"
+          chmod 700 "$HOME/.gnupg"
+          printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+      - name: Build signed apt repository
+        env:
+          APT_GPG_KEY_ID: ${{ secrets.APT_GPG_KEY_ID }}
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          passphrase_args=()
+          if [[ -n "${APT_GPG_PASSPHRASE}" ]]; then
+            passphrase_args+=(--gpg-passphrase-env APT_GPG_PASSPHRASE)
+          fi
+          python packaging/scripts/build-apt-repo.py \
+            --deb packaging/out/*.deb \
+            --output-dir packaging/out/site/apt \
+            --origin dexctl \
+            --label dexctl \
+            --description-label "dexctl signed apt repository" \
+            --gpg-key-id "${APT_GPG_KEY_ID}" \
+            "${passphrase_args[@]}"
+          gpg --batch --yes --armor --export "${APT_GPG_KEY_ID}" > packaging/out/site/apt/dexctl-archive-keyring.asc
+      - name: Write GitHub Pages landing page
+        run: |
+          cat > packaging/out/site/index.html <<EOF
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <title>dexctl package repositories</title>
+            </head>
+            <body>
+              <h1>dexctl package repositories</h1>
+              <p>The signed apt repository is published at <code>${APT_REPOSITORY_URL}</code>.</p>
+              <p>Install the repository key from <code>${APT_REPOSITORY_URL}/dexctl-archive-keyring.asc</code>.</p>
+            </body>
+          </html>
+          EOF
+      - name: Stage release artifacts
+        run: |
+          mkdir -p packaging/out/release-bundle/dist
+          cp dist/* packaging/out/release-bundle/dist/
+          cp packaging/homebrew/dexctl.rb packaging/out/release-bundle/
+          cp packaging/out/*.deb packaging/out/release-bundle/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packaging/out/site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: packaging/out/release-bundle
+
+  deploy-apt-repository:
+    runs-on: ubuntu-latest
+    needs: build-artifacts
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs:
+      - build-artifacts
+      - deploy-apt-repository
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: packaging/out/release-bundle
       - name: Publish Homebrew tap update
         if: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN != '' }}
         env:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           TAP_URL="https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/ravihammond/homebrew-dexctl.git"
-          packaging/scripts/publish-homebrew-tap.sh "$TAP_URL" packaging/homebrew/dexctl.rb
+          packaging/scripts/publish-homebrew-tap.sh "$TAP_URL" packaging/out/release-bundle/dexctl.rb
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*
-            packaging/homebrew/dexctl.rb
-            packaging/out/*.deb
+            packaging/out/release-bundle/dist/*
+            packaging/out/release-bundle/dexctl.rb
+            packaging/out/release-bundle/*.deb
       - name: Publish to PyPI
         if: startsWith(github.ref, 'refs/tags/v')
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packaging/out/release-bundle/dist

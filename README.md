@@ -67,13 +67,24 @@ brew install dexctl
 
 ### Option 4: Debian package
 
-Once release `.deb` artifacts are published:
+Once the signed apt repository is published:
+
+```bash
+curl -fsSL https://ravihammond.github.io/dexctl/apt/dexctl-archive-keyring.asc \
+  | sudo gpg --dearmor -o /usr/share/keyrings/dexctl-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/dexctl-archive-keyring.gpg] https://ravihammond.github.io/dexctl/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/dexctl.list >/dev/null
+sudo apt update
+sudo apt install dexctl
+```
+
+The hosted apt repository is intended for current Ubuntu LTS and Debian stable systems.
+
+If you prefer a one-off manual install from a GitHub Release artifact, the fallback remains:
 
 ```bash
 sudo apt install ./dexctl_<version>_all.deb
 ```
-
-True `apt install dexctl` requires a maintained apt repository or PPA. That is a later distribution channel, not the default installation path.
 
 ## Quick Start
 
@@ -137,10 +148,12 @@ The intended release flow is:
 
 1. run the full test suite locally
 2. tag a release
-3. let GitHub Actions build sdist / wheel / optional `.deb`
-4. publish to GitHub Releases
-5. publish to PyPI
-6. update the Homebrew tap formula
+3. let GitHub Actions build sdist / wheel / `.deb`
+4. generate and sign the apt repository metadata
+5. publish the apt repository to GitHub Pages
+6. publish to GitHub Releases
+7. publish to PyPI
+8. update the Homebrew tap formula
 
 ## Packaging Notes
 
@@ -148,6 +161,7 @@ The intended release flow is:
 - CI and release workflows live in `.github/workflows/`
 - Homebrew formula scaffolding lives in `packaging/homebrew/`
 - Debian packaging scaffolding lives in `packaging/debian/`
+- Apt repository generation lives in `packaging/scripts/build-apt-repo.py`
 
 ## License
 
