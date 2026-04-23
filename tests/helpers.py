@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import io
 import json
 import os
@@ -299,7 +300,12 @@ def run_cli_in_pty(
                 if time.time() - last_data >= quiet_for:
                     break
                 continue
-            chunk = os.read(master_fd, 65536)
+            try:
+                chunk = os.read(master_fd, 65536)
+            except OSError as exc:
+                if exc.errno == errno.EIO:
+                    break
+                raise
             if not chunk:
                 break
             raw.extend(chunk)
