@@ -48,7 +48,7 @@ jobs:
             --version "${GITHUB_REF_NAME#v}" \
             --artifact dist/*.tar.gz
       - name: Build Debian artifact
-        run: packaging/scripts/build-deb.sh
+        run: PATH="/usr/bin:$PATH" packaging/scripts/build-deb.sh
       - name: Validate apt repository signing configuration
         env:
           APT_GPG_KEY_ID: ${{ secrets.APT_GPG_KEY_ID }}
