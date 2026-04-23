@@ -125,6 +125,8 @@ jobs:
     needs:
       - build-artifacts
       - deploy-apt-repository
+    env:
+      HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
@@ -132,9 +134,7 @@ jobs:
           name: release-artifacts
           path: packaging/out/release-bundle
       - name: Publish Homebrew tap update
-        if: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN != '' && !contains(github.ref_name, '-') }}
-        env:
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        if: ${{ env.HOMEBREW_TAP_GITHUB_TOKEN != '' && !contains(github.ref_name, '-') }}
         run: |
           TAP_URL="https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/ravihammond/homebrew-dexctl.git"
           packaging/scripts/publish-homebrew-tap.sh "$TAP_URL" packaging/out/release-bundle/dexctl.rb
