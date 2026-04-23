@@ -29,6 +29,7 @@ jobs:
             dh-python \
             dpkg-dev \
             gnupg \
+            python3-build \
             pybuild-plugin-pyproject \
             python3-all \
             python3-prompt-toolkit \
