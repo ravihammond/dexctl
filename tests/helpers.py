@@ -87,7 +87,7 @@ def build_legacy_home() -> TempHome:
     runtime_config = paths.runtime_config(str(paths.default_runtime_home))
     runtime_config.parent.mkdir(parents=True, exist_ok=True)
     runtime_config.write_text('model = "gpt-5.4"\n', encoding="utf-8")
-    paths.legacy_pointer.write_text("ravi\n", encoding="utf-8")
+    paths.legacy_pointer.write_text("alice\n", encoding="utf-8")
     return TempHome(root=temp_root, app=app)
 
 
