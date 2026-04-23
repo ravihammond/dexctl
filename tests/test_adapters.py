@@ -13,7 +13,8 @@ from unittest import mock
 from tests.helpers import build_legacy_home, migrate_app
 
 
-ROOT = pathlib.Path("/Users/ravi")
+ROOT = pathlib.Path.home()
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEXCTL_WRAPPER = ROOT / ".local" / "bin" / "dexctl"
 USAGE_WRAPPER = ROOT / ".local" / "bin" / "codex-usage-status"
 ZSHRC = ROOT / ".zshrc"
@@ -22,6 +23,8 @@ ITERM_SCRIPT = ROOT / "Library" / "Application Support" / "iTerm2" / "Scripts" /
 
 class AdapterTests(unittest.TestCase):
     def test_zshrc_is_thin_cli_adapter(self) -> None:
+        if not ZSHRC.exists():
+            self.skipTest(f"missing local adapter file: {ZSHRC}")
         text = ZSHRC.read_text(encoding="utf-8")
         self.assertIn("dexctl show", text)
         self.assertIn("dexctl runtime prepare --json", text)
@@ -29,12 +32,14 @@ class AdapterTests(unittest.TestCase):
         self.assertNotIn("CODEX_ACCOUNT_EMAIL", text)
 
     def test_usage_wrapper_delegates_to_cli(self) -> None:
+        if not USAGE_WRAPPER.exists():
+            self.skipTest(f"missing local adapter file: {USAGE_WRAPPER}")
         temp = build_legacy_home()
         migrate_app(temp.app)
         env = os.environ.copy()
         env["HOME"] = str(temp.root)
         env["DEXCTL_ROOT"] = str(temp.root / ".codex-account")
-        env["DEXCTL_SRC_ROOT"] = str(ROOT / "src" / "dexctl" / "src")
+        env["DEXCTL_SRC_ROOT"] = str(REPO_ROOT / "src")
         result = subprocess.run(
             [sys.executable, str(USAGE_WRAPPER)],
             env=env,
@@ -46,8 +51,10 @@ class AdapterTests(unittest.TestCase):
         self.assertIn("usage:", result.stdout)
 
     def test_dexctl_wrapper_bootstraps_from_src_override(self) -> None:
+        if not DEXCTL_WRAPPER.exists():
+            self.skipTest(f"missing local adapter file: {DEXCTL_WRAPPER}")
         env = os.environ.copy()
-        env["DEXCTL_SRC_ROOT"] = str(ROOT / "src" / "dexctl" / "src")
+        env["DEXCTL_SRC_ROOT"] = str(REPO_ROOT / "src")
         result = subprocess.run(
             [sys.executable, str(DEXCTL_WRAPPER), "--help"],
             env=env,
@@ -59,6 +66,8 @@ class AdapterTests(unittest.TestCase):
         self.assertIn("dexctl", result.stdout)
 
     def test_iterm_adapter_delegates_to_dexctl(self) -> None:
+        if not ITERM_SCRIPT.exists():
+            self.skipTest(f"missing local adapter file: {ITERM_SCRIPT}")
         fake_iterm2 = types.SimpleNamespace(
             Reference=lambda value: value,
             RPC=lambda fn: fn,

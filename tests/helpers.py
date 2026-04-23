@@ -76,6 +76,7 @@ class CaptureVt100Output(Vt100_Output):
 def build_legacy_home() -> TempHome:
     temp_root = pathlib.Path(tempfile.mkdtemp(prefix="dexctl-test-home-"))
     paths = Paths(home=temp_root)
+    paths.default_native_codex = pathlib.Path(sys.executable)
     app = DexctlApp(paths)
     write_json(paths.legacy_primary_auth("alice"), make_auth("alice@example.com"))
     write_json(paths.legacy_primary_auth("bob"), make_auth("bob@example.com"))
@@ -154,7 +155,7 @@ def interpret_vt100(text: str, *, width: int = 120) -> str:
                 i += 1
                 continue
             j = i + 2
-            while j < len(text) and text[j] not in "@ABCDEFGHJKSTfmhlsu":
+            while j < len(text) and text[j] not in "@ABCDEFGHJKSTfmhlnsu":
                 j += 1
             if j >= len(text):
                 break
@@ -212,7 +213,7 @@ def interpret_vt100(text: str, *, width: int = 120) -> str:
             elif final == "u" and saved_cursor is not None:
                 row, col = saved_cursor
                 ensure_row(row)
-            elif final in ("m", "h", "l", "S", "T"):
+            elif final in ("m", "h", "l", "n", "S", "T"):
                 pass
 
             i = j + 1

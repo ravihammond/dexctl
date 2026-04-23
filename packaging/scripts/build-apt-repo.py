@@ -76,12 +76,15 @@ def load_deb_metadata(path: Path) -> dict[str, str]:
     if dpkg_deb is None:
         return {}
 
-    proc = subprocess.run(
-        [dpkg_deb, "-f", str(path)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            [dpkg_deb, "-f", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        return {}
     return parse_control_paragraph(proc.stdout)
 
 
