@@ -132,7 +132,7 @@ jobs:
           name: release-artifacts
           path: packaging/out/release-bundle
       - name: Publish Homebrew tap update
-        if: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN != '' }}
+        if: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN != '' && !contains(github.ref_name, '-') }}
         env:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
@@ -146,7 +146,7 @@ jobs:
             packaging/out/release-bundle/dexctl.rb
             packaging/out/release-bundle/*.deb
       - name: Publish to PyPI
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: packaging/out/release-bundle/dist

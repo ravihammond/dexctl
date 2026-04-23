@@ -23,7 +23,16 @@
    git push origin main --tags
    ```
 
-4. Wait for the GitHub Actions `Release` workflow to:
+4. Optional dry run before the real release:
+
+   ```bash
+   git tag vX.Y.Z-test1
+   git push origin vX.Y.Z-test1
+   ```
+
+   Tags that contain `-` still run the release workflow, but they skip PyPI publication and Homebrew tap updates so the apt repository and GitHub Release path can be exercised safely.
+
+5. Wait for the GitHub Actions `Release` workflow to:
    - run tests
    - build the sdist and wheel
    - render the Homebrew formula
@@ -31,9 +40,10 @@
    - generate `Packages`, `Release`, `Release.gpg`, and `InRelease`
    - publish the signed apt repository to GitHub Pages
    - attach artifacts to the GitHub Release
-   - publish to PyPI
+   - publish to PyPI for stable `vX.Y.Z` tags
+   - update the Homebrew tap only for stable `vX.Y.Z` tags when `HOMEBREW_TAP_GITHUB_TOKEN` is configured
 
-5. If `HOMEBREW_TAP_GITHUB_TOKEN` is configured, the workflow can also update the tap repository.
+6. Confirm the published pages are reachable before telling users to install from apt. GitHub Pages propagation can take several minutes.
 
 ## Post-release verification
 
@@ -43,3 +53,8 @@
 - `curl -fsSL https://ravihammond.github.io/dexctl/apt/dexctl-archive-keyring.asc | gpg --show-keys`
 - `sudo apt update && sudo apt install dexctl` on a clean Debian-family machine
 - direct `.deb` installation from the GitHub Release as a fallback path
+
+## Troubleshooting
+
+- If the apt repository files return `404`, wait a few minutes and retry after the `deploy-apt-repository` job succeeds.
+- If `apt update` fails, verify the keyring path, the `deb` line, and that `InRelease` is reachable from the published Pages site.
