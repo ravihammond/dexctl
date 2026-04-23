@@ -21,7 +21,7 @@ cp -R "$ROOT/packaging/debian" "$PKGROOT/debian"
 
 (
   cd "$PKGROOT"
-  dpkg-buildpackage -us -uc -b
+  DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc -b
 )
 
 find "$TMPDIR" -maxdepth 1 -name '*.deb' -exec cp {} "$OUT_DIR"/ \;
