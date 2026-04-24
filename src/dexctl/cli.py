@@ -5,7 +5,7 @@ import json
 import sys
 
 from .app import DexctlApp, DexctlError
-from .render import render_ls, render_ls_interactive, render_show
+from .render import render_ls, render_ls_interactive, render_ls_watch, render_show
 from .ui import PickerItem, reorder_items
 
 
@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(
         dest="command",
-        required=True,
+        required=False,
         title="commands",
         metavar="COMMAND",
         description=(
@@ -93,33 +93,46 @@ def build_parser() -> argparse.ArgumentParser:
             help="Emit machine-readable JSON instead of human output.",
         )
 
-    ls_cmd = sub.add_parser(
-        "ls",
-        help="List registered accounts with plan, usage, and health summary.",
+    pick_cmd = sub.add_parser(
+        "pick",
+        help="Open the interactive account picker.",
         description=(
-            "List all registered accounts in persisted cycle order.\n\n"
-            "Default behavior is stale-aware: cached usage is reused when fresh and refreshed when stale.\n"
-            "Use --refresh to force a live usage fetch or --cached for a strictly local read."
+            "Open an inline TUI picker showing all accounts. Navigate with j/k or arrows, Enter to switch."
         ),
         formatter_class=formatter,
     )
-    ls_mode = ls_cmd.add_mutually_exclusive_group()
-    ls_mode.add_argument(
+    pick_mode = pick_cmd.add_mutually_exclusive_group()
+    pick_mode.add_argument(
         "--refresh",
         action="store_true",
-        help="Force live usage refresh for every listed account.",
+        help="Force live usage refresh before opening the picker.",
     )
-    ls_mode.add_argument(
+    pick_mode.add_argument(
         "--cached",
         action="store_true",
         help="Use cached usage data only; do not attempt network refresh.",
     )
-    ls_cmd.add_argument(
-        "--pick",
-        action="store_true",
-        help="Open the interactive account picker. Navigate with j/k or arrows, Enter to switch.",
+
+    watch_cmd = sub.add_parser(
+        "watch",
+        help="Live-updating account usage display.",
+        description="Display account usage and auto-refresh on an interval. Press q or Esc to quit.",
+        formatter_class=formatter,
     )
-    add_json_flag(ls_cmd)
+    watch_cmd.add_argument(
+        "scope",
+        nargs="?",
+        choices=["all"],
+        default=None,
+        help="Pass 'all' to watch all accounts. Omit to watch only the current account.",
+    )
+    watch_cmd.add_argument(
+        "-n", "--interval",
+        type=float,
+        default=2.0,
+        metavar="SECS",
+        help="Refresh interval in seconds (default: 2). Decimals allowed, e.g. 0.5.",
+    )
 
     current_cmd = sub.add_parser(
         "current",
@@ -465,24 +478,32 @@ def main(argv: list[str] | None = None) -> int:
 
         registry = app.load_registry()
 
-        if args.command == "ls":
-            mode = "refresh" if args.refresh else "cached" if args.cached else "auto"
-            if getattr(args, "pick", False):
-                result = app.list_result(registry, mode=mode)
-                try:
-                    chosen = render_ls_interactive(result, app)
-                except RuntimeError as exc:
-                    raise DexctlError("interactive_unavailable", str(exc)) from exc
-                if chosen and chosen != registry.active_account_id:
-                    with app.locked():
-                        registry = app.load_registry()
-                        app.switch_account(registry, chosen)
-                return 0
+        if args.command in (None, "ls"):
+            mode = "refresh" if getattr(args, "refresh", False) else "cached" if getattr(args, "cached", False) else "auto"
             result = app.list_result(registry, mode=mode)
             if as_json:
                 print(json.dumps({"status": "ok", "result": result}, indent=2))
                 return 0
             render_ls(result, app)
+            return 0
+        if args.command == "pick":
+            mode = "refresh" if args.refresh else "cached" if args.cached else "auto"
+            result = app.list_result(registry, mode=mode)
+            try:
+                chosen = render_ls_interactive(result, app)
+            except RuntimeError as exc:
+                raise DexctlError("interactive_unavailable", str(exc)) from exc
+            if chosen and chosen != registry.active_account_id:
+                with app.locked():
+                    registry = app.load_registry()
+                    app.switch_account(registry, chosen)
+            return 0
+        if args.command == "watch":
+            result = app.list_result(registry, mode="refresh")
+            try:
+                render_ls_watch(result, app, registry, interval=args.interval, watch_all=args.scope == "all")
+            except RuntimeError as exc:
+                raise DexctlError("interactive_unavailable", str(exc)) from exc
             return 0
         if args.command == "current":
             return emit(app.current_result(registry), as_json=as_json, render=app.render_current)

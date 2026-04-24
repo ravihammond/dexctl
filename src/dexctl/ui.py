@@ -121,6 +121,73 @@ def run_inline_picker(
     return application.run()
 
 
+def run_watch(
+    render_frame: Callable[[int, int], str],
+    *,
+    interval: float,
+    on_tick: Callable[[], None],
+    input=None,
+    output=None,
+) -> None:
+    import threading
+
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.application.current import get_app
+    from prompt_toolkit.formatted_text import ANSI
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout import Layout, Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
+    from prompt_toolkit.output import ColorDepth
+
+    if input is None and output is None and not _supports_raw_ui():
+        raise RuntimeError("watch requires a TTY")
+
+    stop = threading.Event()
+    last_height: list[int] = [1]
+
+    def _render_text():
+        app = get_app()
+        size = app.output.get_size()
+        text = render_frame(size.columns, size.rows)
+        last_height[0] = max(1, text.count("\n"))
+        return ANSI(text)
+
+    from prompt_toolkit.layout.dimension import Dimension
+
+    def _height() -> Dimension:
+        return Dimension(preferred=last_height[0], max=last_height[0])
+
+    control = FormattedTextControl(_render_text, focusable=False, show_cursor=False)
+    bindings = KeyBindings()
+
+    @bindings.add("q")
+    @bindings.add("escape")
+    def _quit(event) -> None:
+        stop.set()
+        event.app.exit()
+
+    application = Application(
+        layout=Layout(Window(content=control, wrap_lines=False, always_hide_cursor=True, height=_height)),
+        key_bindings=bindings,
+        full_screen=False,
+        erase_when_done=True,
+        include_default_pygments_style=False,
+        color_depth=ColorDepth.TRUE_COLOR,
+        input=input,
+        output=output,
+    )
+
+    def _ticker():
+        while not stop.wait(interval):
+            on_tick()
+            application.invalidate()
+
+    t = threading.Thread(target=_ticker, daemon=True)
+    t.start()
+    application.run()
+    stop.set()
+
+
 def select_item(items: Sequence[PickerItem], title: str, footer: str) -> str | None:
     if not items:
         return None
