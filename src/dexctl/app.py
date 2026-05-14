@@ -389,6 +389,13 @@ class DexctlApp:
             return None
         return email.strip().lower()
 
+    def is_access_token_expired(self, auth: dict[str, Any]) -> bool:
+        payload = self.decode_access_token_payload(auth)
+        exp = payload.get("exp")
+        if not isinstance(exp, (int, float)):
+            return False
+        return datetime.now(UTC).timestamp() >= exp
+
     def load_auth(self, path: pathlib.Path) -> dict[str, Any]:
         try:
             auth = json.loads(path.read_text(encoding="utf-8"))
@@ -833,6 +840,14 @@ class DexctlApp:
                 "auth_identity_mismatch",
                 f"primary auth for `{account.id}` decodes to `{decoded_email}` not `{account.email}`",
             )
+        if self.is_access_token_expired(auth):
+            try:
+                self.refresh_auth(auth, auth_path)
+            except DexctlError as exc:
+                raise DexctlError(
+                    "auth_refresh_required",
+                    f"access token for `{account.id}` is expired and could not be refreshed: {exc.message}",
+                ) from exc
         config_info = self.ensure_runtime_config(registry.runtime_home)
         self.atomic_copy(auth_path, self.paths.runtime_auth(registry.runtime_home))
         if registry.compatibility.get("write_active_account_file", True):
@@ -978,6 +993,38 @@ class DexctlApp:
             "active_account_id": account_id,
             "prepared_runtime": prepared,
             "account": self.account_summary(registry, registry.accounts[account_id], mode="cached"),
+        }
+
+    def reauth_account(
+        self,
+        registry: Registry,
+        account_id: str,
+        *,
+        device_auth: bool = False,
+    ) -> dict[str, Any]:
+        account = self.resolve_account(registry, account_id)
+        auth_path = self.paths.account_auth(account.id)
+        auth = self.load_auth(auth_path)
+        method = "refresh"
+        try:
+            self.refresh_auth(auth, auth_path)
+        except DexctlError:
+            login_mode = "device-auth" if device_auth else "browser"
+            method = login_mode
+            new_auth = self.stage_login_auth(
+                registry.native_codex_path, account.id, login_mode=login_mode
+            )
+            decoded = self.decode_auth_email(new_auth)
+            if decoded != account.email:
+                raise DexctlError(
+                    "email_mismatch",
+                    f"reauth yielded `{decoded}` but account is registered as `{account.email}`",
+                )
+            self.atomic_write_json(auth_path, new_auth)
+        return {
+            "account_id": account.id,
+            "email": account.email,
+            "auth_method": method,
         }
 
     def cycle_account(self, registry: Registry, direction: str) -> dict[str, Any]:
@@ -1167,6 +1214,15 @@ class DexctlApp:
                     add("error", "invalid_primary_auth", "invalid primary auth", account_id=account_id, path=str(auth_path))
                 elif auth_email != account.email:
                     add("error", "primary_auth_email_mismatch", "primary auth email mismatch", account_id=account_id, expected_email=account.email, actual_email=auth_email)
+            if auth_path.exists():
+                with contextlib.suppress(DexctlError):
+                    if self.is_access_token_expired(self.load_auth(auth_path)):
+                        add(
+                            "warning",
+                            "access_token_expired",
+                            "access token is expired — switch to this account or run `dexctl inspect` to refresh",
+                            account_id=account_id,
+                        )
             legacy_mirror = self.paths.legacy_mirror_auth(account_id)
             if legacy_mirror.exists():
                 mirror_email = self.auth_email_from_path(legacy_mirror)

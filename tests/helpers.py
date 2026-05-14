@@ -17,6 +17,8 @@ import threading
 import time
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
 from unittest import mock
 
 from prompt_toolkit.data_structures import Size
@@ -25,11 +27,12 @@ from prompt_toolkit.output.vt100 import Vt100_Output
 from dexctl.app import DexctlApp, Paths
 
 
-def make_token(email: str) -> str:
+def make_token(email: str, *, exp: int | None = None) -> str:
     header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode()).decode().rstrip("=")
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"https://api.openai.com/profile": {"email": email}}).encode()
-    ).decode().rstrip("=")
+    claims: dict[str, Any] = {"https://api.openai.com/profile": {"email": email}}
+    if exp is not None:
+        claims["exp"] = exp
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
     return f"{header}.{payload}.sig"
 
 
@@ -45,6 +48,13 @@ def make_auth(email: str, *, refresh_token: str = "refresh-token", auth_mode: st
             "account_id": f"acct-{email}",
         },
     }
+
+
+def make_expired_auth(email: str, *, refresh_token: str = "refresh-token") -> dict:
+    expired_exp = int(datetime.now(UTC).timestamp()) - 3600
+    base = make_auth(email, refresh_token=refresh_token)
+    base["tokens"]["access_token"] = make_token(email, exp=expired_exp)
+    return base
 
 
 def write_json(path: pathlib.Path, payload: dict) -> pathlib.Path:

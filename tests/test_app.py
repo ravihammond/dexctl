@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import pathlib
 import tempfile
+import time
 import unittest
+from datetime import UTC, datetime
 from unittest import mock
 
 from dexctl.app import Account, DexctlApp, DexctlError, Paths, Registry, UsageSnapshot, UsageWindow
 
-from tests.helpers import build_legacy_home, make_auth, migrate_app, write_json
+from tests.helpers import build_legacy_home, make_auth, make_expired_auth, make_token, migrate_app, write_json
 
 
 class AppTests(unittest.TestCase):
@@ -403,3 +405,153 @@ class AppTests(unittest.TestCase):
         self.assertIn("legacy_mirror_drift", codes)
         self.assertIn("runtime_config_invalid", codes)
         self.assertIn("usage_cache_corrupt", codes)
+
+
+class TestPrepareRuntimeTokenExpiry(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = build_legacy_home()
+        self.app = self.temp.app
+        self.paths = self.app.paths
+
+    # --- is_access_token_expired unit tests ---
+
+    def test_is_access_token_expired_false_when_no_exp(self) -> None:
+        auth = make_auth("alice@example.com")
+        self.assertFalse(self.app.is_access_token_expired(auth))
+
+    def test_is_access_token_expired_false_when_future(self) -> None:
+        future_exp = int(datetime.now(UTC).timestamp()) + 3600
+        auth = make_auth("alice@example.com")
+        auth["tokens"]["access_token"] = make_token("alice@example.com", exp=future_exp)
+        self.assertFalse(self.app.is_access_token_expired(auth))
+
+    def test_is_access_token_expired_true_when_past(self) -> None:
+        auth = make_expired_auth("alice@example.com")
+        self.assertTrue(self.app.is_access_token_expired(auth))
+
+    # --- prepare_runtime expiry behaviour ---
+
+    def _setup_registry(self) -> object:
+        migrate_app(self.app)
+        return self.app.load_registry()
+
+    def test_prepare_runtime_does_not_refresh_valid_token(self) -> None:
+        registry = self._setup_registry()
+        with mock.patch.object(self.app, "refresh_auth") as mock_refresh:
+            self.app.prepare_runtime(registry, "alice")
+        mock_refresh.assert_not_called()
+
+    def test_prepare_runtime_refreshes_expired_token(self) -> None:
+        registry = self._setup_registry()
+        auth_path = self.paths.account_auth("alice")
+        write_json(auth_path, make_expired_auth("alice@example.com"))
+
+        fresh_auth = make_auth("alice@example.com")
+
+        def fake_refresh(auth: dict, path: pathlib.Path) -> dict:
+            write_json(path, fresh_auth)
+            return fresh_auth
+
+        with mock.patch.object(self.app, "refresh_auth", side_effect=fake_refresh) as mock_refresh:
+            result = self.app.prepare_runtime(registry, "alice")
+
+        mock_refresh.assert_called_once()
+        runtime_auth_path = self.paths.runtime_auth(registry.runtime_home)
+        runtime_auth = json.loads(runtime_auth_path.read_text())
+        # Runtime home should have the fresh (non-expired) token
+        self.assertEqual(
+            runtime_auth["tokens"]["access_token"],
+            fresh_auth["tokens"]["access_token"],
+        )
+        self.assertEqual(result["account_id"], "alice")
+
+    def test_prepare_runtime_raises_when_refresh_fails(self) -> None:
+        registry = self._setup_registry()
+        auth_path = self.paths.account_auth("alice")
+        write_json(auth_path, make_expired_auth("alice@example.com"))
+
+        with mock.patch.object(
+            self.app,
+            "refresh_auth",
+            side_effect=DexctlError("refresh_failed", "token refresh failed with HTTP 400"),
+        ):
+            with self.assertRaises(DexctlError) as ctx:
+                self.app.prepare_runtime(registry, "alice")
+
+        self.assertEqual(ctx.exception.code, "auth_refresh_required")
+        self.assertIn("alice", ctx.exception.message)
+
+    # --- doctor expired token warning ---
+
+    def test_doctor_warns_expired_token(self) -> None:
+        registry = self._setup_registry()
+        # Replace alice's auth with an expired one
+        write_json(self.paths.account_auth("alice"), make_expired_auth("alice@example.com"))
+
+        doctor = self.app.doctor(registry)
+        codes = {item["code"] for item in doctor["findings"]}
+        self.assertIn("access_token_expired", codes)
+        expired_findings = [f for f in doctor["findings"] if f["code"] == "access_token_expired"]
+        self.assertEqual(expired_findings[0]["context"]["account_id"], "alice")
+
+    def test_doctor_no_expired_warning_for_fresh_token(self) -> None:
+        registry = self._setup_registry()
+        doctor = self.app.doctor(registry)
+        codes = {item["code"] for item in doctor["findings"]}
+        self.assertNotIn("access_token_expired", codes)
+
+
+class TestReauthAccount(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = build_legacy_home()
+        self.app = self.temp.app
+        self.paths = self.app.paths
+        migrate_app(self.app)
+
+    def _registry(self):
+        return self.app.load_registry()
+
+    def test_reauth_uses_refresh_when_token_is_fresh(self) -> None:
+        registry = self._registry()
+        with mock.patch.object(self.app, "refresh_auth", return_value=make_auth("alice@example.com")) as mock_refresh:
+            with mock.patch.object(self.app, "stage_login_auth") as mock_login:
+                result = self.app.reauth_account(registry, "alice")
+        mock_refresh.assert_called_once()
+        mock_login.assert_not_called()
+        self.assertEqual(result["account_id"], "alice")
+        self.assertEqual(result["auth_method"], "refresh")
+
+    def test_reauth_falls_back_to_browser_when_refresh_fails(self) -> None:
+        registry = self._registry()
+        fresh_auth = make_auth("alice@example.com")
+        with mock.patch.object(self.app, "refresh_auth", side_effect=DexctlError("refresh_failed", "bad")):
+            with mock.patch.object(self.app, "stage_login_auth", return_value=fresh_auth) as mock_login:
+                result = self.app.reauth_account(registry, "alice")
+        mock_login.assert_called_once()
+        self.assertEqual(mock_login.call_args.kwargs.get("login_mode"), "browser")
+        self.assertEqual(result["auth_method"], "browser")
+        # Auth file should now be the fresh auth
+        saved = json.loads(self.paths.account_auth("alice").read_text())
+        self.assertEqual(saved["tokens"]["access_token"], fresh_auth["tokens"]["access_token"])
+
+    def test_reauth_device_auth_flag_passes_through(self) -> None:
+        registry = self._registry()
+        with mock.patch.object(self.app, "refresh_auth", side_effect=DexctlError("refresh_failed", "bad")):
+            with mock.patch.object(self.app, "stage_login_auth", return_value=make_auth("alice@example.com")) as mock_login:
+                result = self.app.reauth_account(registry, "alice", device_auth=True)
+        self.assertEqual(mock_login.call_args.kwargs.get("login_mode"), "device-auth")
+        self.assertEqual(result["auth_method"], "device-auth")
+
+    def test_reauth_rejects_mismatched_email(self) -> None:
+        registry = self._registry()
+        with mock.patch.object(self.app, "refresh_auth", side_effect=DexctlError("refresh_failed", "bad")):
+            with mock.patch.object(self.app, "stage_login_auth", return_value=make_auth("wrong@example.com")):
+                with self.assertRaises(DexctlError) as ctx:
+                    self.app.reauth_account(registry, "alice")
+        self.assertEqual(ctx.exception.code, "email_mismatch")
+
+    def test_reauth_unknown_account_raises(self) -> None:
+        registry = self._registry()
+        with self.assertRaises(DexctlError) as ctx:
+            self.app.reauth_account(registry, "nonexistent")
+        self.assertEqual(ctx.exception.code, "unknown_account")

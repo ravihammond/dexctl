@@ -257,6 +257,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_json_flag(add_cmd)
 
+    reauth_cmd = sub.add_parser(
+        "reauth",
+        help="Re-authenticate an account (token refresh, or browser login if refresh fails).",
+        description=(
+            "Attempts to refresh the account's access token using its stored refresh token.\n"
+            "If refresh fails (expired or missing refresh token), opens a browser login.\n\n"
+            "Use --device-auth for headless/SSH environments."
+        ),
+        formatter_class=formatter,
+    )
+    reauth_cmd.add_argument("account_id", help="Account id to re-authenticate.")
+    reauth_cmd.add_argument(
+        "--device-auth",
+        action="store_true",
+        help="Use device-auth flow instead of browser login when falling back to re-login.",
+    )
+    reauth_cmd.add_argument(
+        "--activate",
+        action="store_true",
+        help="Switch to this account and prepare runtime after successful re-auth.",
+    )
+    add_json_flag(reauth_cmd)
+
     remove_cmd = sub.add_parser(
         "remove",
         help="Remove an account from the registry.",
@@ -539,6 +562,14 @@ def main(argv: list[str] | None = None) -> int:
                     from_auth=args.from_auth,
                 )
                 return emit(result, as_json=as_json, render=lambda r: f"Added account: {r['account']['id']}")
+        if args.command == "reauth":
+            with app.locked():
+                registry = app.load_registry()
+                result = app.reauth_account(registry, args.account_id, device_auth=args.device_auth)
+                if args.activate:
+                    app.switch_account(registry, args.account_id)
+                    result["activated"] = True
+            return emit(result, as_json=as_json, render=lambda r: f"Re-authenticated {r['account_id']} via {r['auth_method']}")
         if args.command == "remove":
             with app.locked():
                 registry = app.load_registry()

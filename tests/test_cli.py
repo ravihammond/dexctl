@@ -264,3 +264,33 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         payload = json.loads(stdout)
         self.assertEqual(payload["result"]["account"]["id"], "alice")
+
+    def test_reauth_json_output_on_refresh_success(self) -> None:
+        migrate_app(self.app)
+        with mock.patch.object(DexctlApp, "refresh_auth", return_value=make_auth("alice@example.com")):
+            code, stdout, _ = run_cli(["reauth", "alice", "--json"], home=self.temp.root)
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)["result"]
+        self.assertEqual(payload["account_id"], "alice")
+        self.assertEqual(payload["auth_method"], "refresh")
+
+    def test_reauth_activate_switches_account(self) -> None:
+        migrate_app(self.app)
+        with mock.patch.object(DexctlApp, "refresh_auth", return_value=make_auth("bob@example.com")):
+            code, stdout, _ = run_cli(
+                ["reauth", "bob", "--activate", "--json"], home=self.temp.root
+            )
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)["result"]
+        self.assertTrue(payload.get("activated"))
+        # Active account should now be bob
+        code2, stdout2, _ = run_cli(["current", "--json"], home=self.temp.root)
+        active = json.loads(stdout2)["result"]["account"]["id"]
+        self.assertEqual(active, "bob")
+
+    def test_reauth_unknown_account_returns_error(self) -> None:
+        migrate_app(self.app)
+        code, _, stderr = run_cli(["reauth", "nobody", "--json"], home=self.temp.root)
+        self.assertEqual(code, 1)
+        payload = json.loads(stderr)
+        self.assertEqual(payload["error"]["code"], "unknown_account")
